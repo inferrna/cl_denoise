@@ -11,49 +11,34 @@ mf = cl.mem_flags
 
 
 tplsrc = """
+<% from math import cos,sqrt %>
+<% from decimal import Decimal %>
+<% radius = len(rads[0]) %>
+<% rads_cnt = len(rads) %>
+<% pi = 3.14159265358979323846 %>
 #ifndef INFINITY
 #define INFINITY 1.0/0
 #endif
 #ifndef M_PI
-#define M_PI 3.14159265358979323846
+#define M_PI ${Decimal(pi)}
 #endif
 
+#define c0 ${Decimal(1. / sqrt(2.) * sqrt(2. / radius))}
+% for i in range(1,radius+2):
+#define c${i} ${Decimal(cos(pi * i / (2*radius)) * sqrt(2. / radius))}
+% endfor
 
-#define a x[0]
-#define b x[1]
-#define c x[2]
-#define d x[3]
-#define e x[4]
-#define f x[5]
-#define g x[6]
-#define h x[7]
-<% radius = len(rads[0]) %>
-<% rads_cnt = len(rads) %>
-<% from math import sqrt %>
 
 ${dtype} fstval(const ${dtype} x[${radius}]){
-    static const ${dtype} c0 = 1. / sqrt((${dtype})2.) * sqrt((${dtype})(2. / ${radius}.));
-% for i in range(1,radius+2):
-    static const ${dtype} c${i} = cos((${dtype})(M_PI * ${i}. / ${2*radius}.)) * sqrt((${dtype})(2. / ${radius}.));
-% endfor
     return ${' '.join(['{1}*x[{0}]'.format(c, j) for c,j in enumerate(allc[n])])};
 }
 
 
 ${dtype} highfq(const ${dtype} x[${radius}]) {
-    static const ${dtype} c0 = 1. / sqrt((${dtype})2.) * sqrt((${dtype})(2. / ${radius}.));
-% for i in range(1,radius+2):
-    static const ${dtype} c${i} = cos((${dtype})(M_PI * ${i}. / ${2*radius}.)) * sqrt((${dtype})(2. / ${radius}.));
-% endfor
-    //return a*c7 - b*c5 + c*c3 - d*c1 + e*c1 - f*c3 + g*c5 - h*c7;
     return ${' '.join(['{1}*x[{0}]'.format(c, j) for c,j in enumerate(allct[radius-1])])};
 }
 
 void dct_ii_${radius}a(const ${dtype} x[${radius}], ${dtype} X[${radius}]) {
-    static const ${dtype} c0 = 1. / sqrt((${dtype})2.) * sqrt((${dtype})(2. / ${radius}.));
-% for i in range(1,radius+2):
-    static const ${dtype} c${i} = cos((${dtype})(M_PI * ${i}. / ${2*radius}.)) * sqrt((${dtype})(2. / ${radius}.));
-% endfor
 % for i in range(0,radius):
     X[${i}] = ${' '.join(['{1}*x[{0}]'.format(c, j) for c,j in enumerate(allct[i])])};
 % endfor
@@ -63,13 +48,13 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
     size_t gy = get_global_id(0) + ${radius}; //With offset
     size_t gx = get_global_id(1) + ${radius}; //With offset
     size_t idx = gy*${w} + gx;
-    size_t x, y, mini = 0;
+    uint x, y, mini = 0;
     ${dtype} data[${radius}];
     ${dtype} dctf[${radius}];
     ${dtype} dcmin = INFINITY;
     ${dtype} dccurrent;
 
-    static const char rads[${len(rads)}][${len(rads[0])}][2] = {${(',\\\\\\n'+40*' ').join(['{'+', '.join(['{'+str(a)+', '+str(b)+'}' for a, b in coords])+'}' for coords in rads])}};
+    const char rads[${len(rads)}][${len(rads[0])}][2] = {${(',\\\\\\n'+33*' ').join(['{'+', '.join(['{'+str(a)+', '+str(b)+'}' for a, b in coords])+'}' for coords in rads])}};
     for(uint i=0; i<${rads_cnt}; i++){
         for(uint j=0; j<${radius}; j++){
             y = rads[i][j][0];
@@ -77,8 +62,8 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
             data[j] = (${dtype}) 1.0*gdatain[idx + ${w}*y + x];
         }
         dccurrent = highfq(data);
-        mini  = select(mini, i, (int)(dccurrent<dcmin));
-        dcmin = select(dcmin, dccurrent, (uint)(mini==i));
+        mini  = select(mini, i, (uint)(dccurrent<dcmin));
+        dcmin = select(dcmin, dccurrent, (int)(mini==i));
     }
     for(uint j=0; j<${radius}; j++){
         y = rads[mini][j][0];
