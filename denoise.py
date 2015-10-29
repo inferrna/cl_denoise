@@ -27,16 +27,14 @@ tplsrc = """
 #define f x[5]
 #define g x[6]
 #define h x[7]
+<% radius = len(rads[0]) %>
+<% rads_cnt = len(rads) %>
 
 ${dtype} fstval(const ${dtype} x[8]){
-    static const ${dtype} c0 = 1. / sqrt((${dtype})2.) * sqrt((${dtype})(2. / 8.));
-    static const ${dtype} c1 = cos((${dtype})(M_PI * 1. / 16.)) * sqrt((${dtype})(2. / 8.));
-    static const ${dtype} c2 = cos((${dtype})(M_PI * 2. / 16.)) * sqrt((${dtype})(2. / 8.));
-    static const ${dtype} c3 = cos((${dtype})(M_PI * 3. / 16.)) * sqrt((${dtype})(2. / 8.));
-    static const ${dtype} c4 = cos((${dtype})(M_PI * 4. / 16.)) * sqrt((${dtype})(2. / 8.));
-    static const ${dtype} c5 = cos((${dtype})(M_PI * 5. / 16.)) * sqrt((${dtype})(2. / 8.));
-    static const ${dtype} c6 = cos((${dtype})(M_PI * 6. / 16.)) * sqrt((${dtype})(2. / 8.));
-    static const ${dtype} c7 = cos((${dtype})(M_PI * 7. / 16.)) * sqrt((${dtype})(2. / 8.));
+    static const ${dtype} c0 = 1. / sqrt((${dtype})2.) * sqrt((${dtype})(2. / ${radius}.));
+% for i in range(1,radius):
+    static const ${dtype} c${i} = cos((${dtype})(M_PI * ${i}. / ${2*radius}.)) * sqrt((${dtype})(2. / ${radius}.));
+% endfor
     return a*c0 + b*c1 + c*c2 + d*c3 + e*c4 + f*c5 + g*c6 + h*c7;
     /*X[1] = a*c0 + b*c3 + c*c6 - d*c7 - e*c4 - f*c1 - g*c2 - h*c5;
     X[2] = a*c0 + b*c5 - c*c6 - d*c1 - e*c4 + f*c7 + g*c2 + h*c3;
@@ -49,25 +47,22 @@ ${dtype} fstval(const ${dtype} x[8]){
 
 
 ${dtype} highfq(const ${dtype} x[8]) {
-    static const ${dtype} c0 = 1. / sqrt((${dtype})2.) * sqrt((${dtype})(2. / 8.));
-    static const ${dtype} c1 = cos((${dtype})(M_PI * 1. / 16.)) * sqrt((${dtype})(2. / 8.));
-    static const ${dtype} c2 = cos((${dtype})(M_PI * 2. / 16.)) * sqrt((${dtype})(2. / 8.));
-    static const ${dtype} c3 = cos((${dtype})(M_PI * 3. / 16.)) * sqrt((${dtype})(2. / 8.));
-    static const ${dtype} c4 = cos((${dtype})(M_PI * 4. / 16.)) * sqrt((${dtype})(2. / 8.));
-    static const ${dtype} c5 = cos((${dtype})(M_PI * 5. / 16.)) * sqrt((${dtype})(2. / 8.));
-    static const ${dtype} c6 = cos((${dtype})(M_PI * 6. / 16.)) * sqrt((${dtype})(2. / 8.));
-    static const ${dtype} c7 = cos((${dtype})(M_PI * 7. / 16.)) * sqrt((${dtype})(2. / 8.));
+    static const ${dtype} c0 = 1. / sqrt((${dtype})2.) * sqrt((${dtype})(2. / ${radius}.));
+% for i in range(1,radius):
+    static const ${dtype} c${i} = cos((${dtype})(M_PI * ${i}. / ${2*radius}.)) * sqrt((${dtype})(2. / ${radius}.));
+% endfor
     return a*c7 - b*c5 + c*c3 - d*c1 + e*c1 - f*c3 + g*c5 - h*c7;
 }
+
 void dct_ii_8a(const ${dtype} x[8], ${dtype} X[8]) {
-    static const ${dtype} c0 = 1. / sqrt((${dtype})2.) * sqrt((${dtype})(2. / 8.));
-    static const ${dtype} c1 = cos((${dtype})(M_PI * 1. / 16.)) * sqrt((${dtype})(2. / 8.));
-    static const ${dtype} c2 = cos((${dtype})(M_PI * 2. / 16.)) * sqrt((${dtype})(2. / 8.));
-    static const ${dtype} c3 = cos((${dtype})(M_PI * 3. / 16.)) * sqrt((${dtype})(2. / 8.));
-    static const ${dtype} c4 = cos((${dtype})(M_PI * 4. / 16.)) * sqrt((${dtype})(2. / 8.));
-    static const ${dtype} c5 = cos((${dtype})(M_PI * 5. / 16.)) * sqrt((${dtype})(2. / 8.));
-    static const ${dtype} c6 = cos((${dtype})(M_PI * 6. / 16.)) * sqrt((${dtype})(2. / 8.));
-    static const ${dtype} c7 = cos((${dtype})(M_PI * 7. / 16.)) * sqrt((${dtype})(2. / 8.));
+    static const ${dtype} c0 = 1. / sqrt((${dtype})2.) * sqrt((${dtype})(2. / ${radius}.));
+% for i in range(1,radius):
+    static const ${dtype} c${i} = cos((${dtype})(M_PI * ${i}. / ${2*radius}.)) * sqrt((${dtype})(2. / ${radius}.));
+% endfor
+% for i in range(0,radius):
+    X[${i}] = ${' '.join(['{1}*x[{0}]'.format(c, j) for c,j in enumerate(allct[i])])};
+% endfor
+/*
     X[0] = a*c0 + b*c0 + c*c0 + d*c0 + e*c0 + f*c0 + g*c0 + h*c0;
     X[1] = a*c1 + b*c3 + c*c5 + d*c7 - e*c7 - f*c5 - g*c3 - h*c1;
     X[2] = a*c2 + b*c6 - c*c6 - d*c2 - e*c2 - f*c6 + g*c6 + h*c2;
@@ -76,11 +71,10 @@ void dct_ii_8a(const ${dtype} x[8], ${dtype} X[8]) {
     X[5] = a*c5 - b*c1 + c*c7 + d*c3 - e*c3 - f*c7 + g*c1 - h*c5;
     X[6] = a*c6 - b*c2 + c*c2 - d*c6 - e*c6 + f*c2 - g*c2 + h*c6;
     X[7] = a*c7 - b*c5 + c*c3 - d*c1 + e*c1 - f*c3 + g*c5 - h*c7;
+*/
 }
 
 __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __global uint *gminis){
-    <% radius = len(rads[0]) %>
-    <% rads_cnt = len(rads) %>
     size_t gy = get_global_id(0) + ${radius}; //With offset
     size_t gx = get_global_id(1) + ${radius}; //With offset
     size_t idx = gy*${w} + gx;
@@ -114,7 +108,7 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
     dctf[4] /= 2.5;
     dctf[3] /= 2;
     dctf[2] /= 1.5;
-    gdataout[idx] = fstval(dctf);
+    gdataout[idx] = clamp((${dtype})fstval(dctf), (${dtype})0.0, (${dtype})1.0);
 }
 """
 
@@ -136,6 +130,24 @@ def get_radius(r, angle):
     return res
 
 rr = 8
+denom = 2*rr
+allc = []
+for n in range(rr):
+  line = []
+  for k in range(rr):
+    num = k * (2*n + 1)
+    while num > denom * 2: num -= denom * 2
+    if num > denom: num = 2 * denom - num
+    if num > denom / 2:
+      pre = "-"
+      num = denom - num
+    else:
+        pre = '+'
+    line.append("{0}c{1}".format(pre, num))
+  allc.append(line)
+import numpy as np
+allct = np.array(allc).T.tolist()
+
 rads = []
 for angle in range(0, 360, 5):
     rads.append(get_radius(rr, angle))
@@ -154,7 +166,7 @@ gminiscl = clarray.zeros_like(datalcl).astype(np.uint32)
 
 h, w = datalcl.shape
 
-ksource = tpl.render(rads=rads, w=w, dtype='float')
+ksource = tpl.render(rads=rads, w=w, allc=allc, allct=allct, dtype='float')
 print(ksource)
 
 
