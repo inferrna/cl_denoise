@@ -106,7 +106,7 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
 """
 
 tpl = Template(tplsrc)
-rr = 6
+rr = 8
 nn = 2
 denom = 2*rr
 
@@ -171,5 +171,5 @@ program.filter(queue, (h-2*rr, w-2*rr,), None, datalcl.ravel().data, res.data, g
 
 resint = np.round(res.get()*255).astype(np.uint8)
 from PIL import Image
-Image.fromarray(np.round(datalcl.get()*255).astype(np.uint8)).show()
-Image.fromarray(resint).show()
+Image.fromarray(np.round(datalcl.get()[:,:,::-1]*255).astype(np.uint8)).show()
+Image.fromarray(resint[:,:,::-1]).show()
