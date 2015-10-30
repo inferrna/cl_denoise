@@ -48,27 +48,32 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
     size_t gy = get_global_id(0) + ${radius}; //With offset
     size_t gx = get_global_id(1) + ${radius}; //With offset
     size_t idx = gy*${w} + gx;
-    uint x, y, mini = 0;
+    uint x, y, mini, c = 0;
+    ${dtype} alldata[${len(crds)}];
     ${dtype} data[${radius}];
     ${dtype} dctf[${radius}];
     ${dtype} dcmin = INFINITY;
     ${dtype} dccurrent;
-
-    const char rads[${len(rads)}][${len(rads[0])}][2] = {${(',\\\\\\n'+33*' ').join(['{'+', '.join(['{'+str(a)+', '+str(b)+'}' for a, b in coords])+'}' for coords in rads])}};
+    
+    const char allcrds[${len(crds)}][2] = {${','.join(['{'+str(a)+', '+str(b)+'}' for a, b in crds])}};
+    for(uint i=0; i<${len(crds)}; i++){
+        x = allcrds[i][0];
+        y = allcrds[i][1];
+        alldata[i] = gdatain[idx + ${w}*y + x];
+    } 
+    const char rads[${len(rads)}][${len(rads[0])}] = {${(',\\\\\\n'+33*' ').join(['{'+', '.join([str(a) for a in coords])+'}' for coords in rads])}};
     for(uint i=0; i<${rads_cnt}; i++){
         for(uint j=0; j<${radius}; j++){
-            y = rads[i][j][0];
-            x = rads[i][j][1];
-            data[j] = (${dtype}) 1.0*gdatain[idx + ${w}*y + x];
+            c = rads[i][j];
+            data[j] = (${dtype}) alldata[c];
         }
         dccurrent = highfq(data);
         mini  = select(mini, i, (uint)(dccurrent<dcmin));
         dcmin = select(dcmin, dccurrent, (int)(mini==i));
     }
     for(uint j=0; j<${radius}; j++){
-        y = rads[mini][j][0];
-        x = rads[mini][j][1];
-        data[j] = (${dtype}) 1.0*gdatain[idx + ${w}*y + x];
+        c = rads[mini][j];
+        data[j] = (${dtype}) alldata[c];
     }
     gminis[idx] = mini;
     dct_ii_${radius}a(data, dctf);
@@ -80,6 +85,9 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
 """
 
 tpl = Template(tplsrc)
+rr = 8
+nn = 2
+denom = 2*rr
 
 def arr_from_np(queue, nparr):
     if nparr.dtype == np.object:
@@ -87,18 +95,17 @@ def arr_from_np(queue, nparr):
     buf = cl.Buffer(ctx, mf.READ_WRITE| mf.COPY_HOST_PTR, hostbuf=nparr)
     return clarray.Array(queue, nparr.shape, nparr.dtype, data=buf)
 
-
+allcircle = []
 def get_radius(n, r, angle):
     res = []
     for i in range(-n, r-n):
-        x = cos(2*pi*angle/360)*i
-        y = sin(2*pi*angle/360)*i
-        res.append((round(y), round(x)))
+        x = round( cos(2*pi*angle/360)*i )
+        y = round( sin(2*pi*angle/360)*i )
+        if not [x,y] in allcircle:
+            allcircle.append([x,y])
+        res.append(allcircle.index([x,y]))
     return res
 
-rr = 12
-nn = 3
-denom = 2*rr
 allc = []
 for n in range(rr):
   line = []
@@ -134,9 +141,9 @@ gminiscl = clarray.zeros_like(datalcl).astype(np.uint32)
 
 h, w = datalcl.shape
 
-ksource = tpl.render(rads=rads, w=w, allc=allc, allct=allct, n=nn, dtype='float')
+ksource = tpl.render(rads=rads, w=w, allc=allc, allct=allct, n=nn, dtype='float', crds=allcircle)
 print(ksource)
-
+#exit()
 
 program = cl.Program(ctx, ksource).build()
 program.filter(queue, (h-2*rr, w-2*rr,), None, datalcl.ravel().data, res.data, gminiscl.data)
