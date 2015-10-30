@@ -16,6 +16,7 @@ tplsrc = """
 <% radius = len(rads[0]) %>
 <% rads_cnt = len(rads) %>
 <% pi = 3.14159265358979323846 %>
+<% s = str(numc) if numc>1 else ''  %>
 #ifndef INFINITY
 #define INFINITY 1.0/0
 #endif
@@ -29,18 +30,18 @@ tplsrc = """
 % endfor
 
 
-${dtype} fstval(const ${dtype} x[${radius}]){
-    return ${' '.join(['{1}*x[{0}]'.format(c, j) for c,j in enumerate(allc[n])])};
+${dtype+s} fstval(const ${dtype+s} x[${radius}]){
+    return ${' '.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allc[n])])};
 }
 
 
-${dtype} highfq(const ${dtype} x[${radius}]) {
-    return ${' '.join(['{1}*x[{0}]'.format(c, j) for c,j in enumerate(allct[radius-1])])};
+${dtype+s} highfq(const ${dtype+s} x[${radius}]) {
+    return ${' '.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[radius-1])])};
 }
 
-void dct_ii_${radius}a(const ${dtype} x[${radius}], ${dtype} X[${radius}]) {
+void dct_ii_${radius}a(const ${dtype+s} x[${radius}], ${dtype+s} X[${radius}]) {
 % for i in range(0,radius):
-    X[${i}] = ${' '.join(['{1}*x[{0}]'.format(c, j) for c,j in enumerate(allct[i])])};
+    X[${i}] = ${' '.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[i])])};
 % endfor
 }
 
@@ -49,43 +50,63 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
     size_t gx = get_global_id(1) + ${radius}; //With offset
     size_t idx = gy*${w} + gx;
     uint x, y, mini, c = 0;
-    ${dtype} alldata[${len(crds)}];
-    ${dtype} data[${radius}];
-    ${dtype} dctf[${radius}];
+    ${dtype+s} alldata[${len(crds)}];
+    ${dtype+s} data[${radius}];
+    ${dtype+s} dctf[${radius}];
+    ${dtype+s} result;
     ${dtype} dcmin = INFINITY;
-    ${dtype} dccurrent;
+    ${dtype} dcsum;
+    ${dtype+s} dccurrent;
     
     const char allcrds[${len(crds)}][2] = {${','.join(['{'+str(a)+', '+str(b)+'}' for a, b in crds])}};
     for(uint i=0; i<${len(crds)}; i++){
         x = allcrds[i][0];
         y = allcrds[i][1];
+% if numc>1:
+% for i in range(numc):
+        alldata[i].s${i} = gdatain[${numc}*(idx + ${w}*y + x)+${i}];
+% endfor
+% else:
         alldata[i] = gdatain[idx + ${w}*y + x];
+% endif
     } 
     const char rads[${len(rads)}][${len(rads[0])}] = {${(',\\\\\\n'+33*' ').join(['{'+', '.join([str(a) for a in coords])+'}' for coords in rads])}};
     for(uint i=0; i<${rads_cnt}; i++){
         for(uint j=0; j<${radius}; j++){
             c = rads[i][j];
-            data[j] = (${dtype}) alldata[c];
+            data[j] = (${dtype+s}) alldata[c];
         }
+% if numc>1:
         dccurrent = highfq(data);
-        mini  = select(mini, i, (uint)(dccurrent<dcmin));
-        dcmin = select(dcmin, dccurrent, (int)(mini==i));
+        dcsum = ${'+'.join(['dccurrent.s'+str(i) for i in range(numc)])};
+% else:
+        dcsum = highfq(data);
+% endif
+        mini  = select(mini, i, (uint)(dcsum<dcmin));
+        dcmin = select(dcmin, dcsum, (int)(mini==i));
     }
     for(uint j=0; j<${radius}; j++){
         c = rads[mini][j];
-        data[j] = (${dtype}) alldata[c];
+        data[j] = (${dtype+s}) alldata[c];
     }
     gminis[idx] = mini;
     dct_ii_${radius}a(data, dctf);
 % for i in range(3, radius):
     dctf[${i}] /= ${i};
-% endfor    
+% endfor
+% if numc>1:
+    result = clamp((${dtype+s})fstval(dctf), (${dtype+s})(${', '.join(['0.0']*numc)}), (${dtype+s})(${', '.join(['1.0']*numc)}));
+% for i in range(numc):
+    gdataout[idx*${numc} + ${i}] = result.s${i};
+% endfor
+% else:
     gdataout[idx] = clamp((${dtype})fstval(dctf), (${dtype})0.0, (${dtype})1.0);
+% endif    
 }
 """
 
 tpl = Template(tplsrc)
-rr = 8
+rr = 6
 nn = 2
 denom = 2*rr
 
@@ -118,16 +139,16 @@ for n in range(rr):
       num = denom - num
     else:
         pre = '+'
-    line.append("{0}c{1}".format(pre, num))
+    line.append((pre, num,))
   allc.append(line)
 import numpy as np
-allct = np.array(allc).T.tolist()
+allct = np.array(allc).transpose(1,0,2).tolist()
 
 rads = []
 for angle in range(0, 360, 5):
     rads.append(get_radius(nn, rr, angle))
 
-datal = cv2.imread("../cvrecogn/cicada_molt_stereo_pair_by_markdow.jpg")[:,:,0]/255
+datal = cv2.imread("../cvrecogn/cicada_molt_stereo_pair_by_markdow.jpg")/255
 
 datal *= 0.9
 datal += np.random.rand(datal.size).reshape(datal.shape)*0.1
@@ -139,9 +160,9 @@ datalcl = arr_from_np(queue, datal.astype(np.float32))
 res = clarray.zeros_like(datalcl)
 gminiscl = clarray.zeros_like(datalcl).astype(np.uint32)
 
-h, w = datalcl.shape
+h, w = datalcl.shape[:2]
 
-ksource = tpl.render(rads=rads, w=w, allc=allc, allct=allct, n=nn, dtype='float', crds=allcircle)
+ksource = tpl.render(rads=rads, w=w, allc=allc, allct=allct, n=nn, dtype='float', crds=allcircle, numc=3)
 print(ksource)
 #exit()
 
