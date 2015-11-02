@@ -54,9 +54,10 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
     ${dtype+s} data[${radius}];
     ${dtype+s} dctf[${radius}];
     ${dtype+s} result;
-    ${dtype} dcmin = INFINITY;
+    ${dtype} dcsmin = INFINITY;
     ${dtype} dcsum;
     ${dtype+s} dccurrent;
+    ${dtype+s} dcmin = (${dtype+s})(${', '.join(numc*['INFINITY'])});
     
     const char allcrds[${len(crds)}][2] = {${','.join(['{'+str(a)+', '+str(b)+'}' for a, b in crds])}};
     for(uint i=0; i<${len(crds)}; i++){
@@ -82,8 +83,9 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
 % else:
         dcsum = highfq(data);
 % endif
-        mini  = select(mini, i, (uint)(dcsum<dcmin));
-        dcmin = select(dcmin, dcsum, (int)(mini==i));
+        dcmin = select(dcmin, dccurrent, (uint${s})(dcsum<dcsmin));
+        mini  = select(mini, i, (uint)(dcsum<dcsmin));
+        dcsmin = select(dcsmin, dcsum, (int)(mini==i));
     }
     for(uint j=0; j<${radius}; j++){
         c = rads[mini][j];
@@ -92,7 +94,9 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
     gminis[idx] = mini;
     dct_ii_${radius}a(data, dctf);
 % for i in range(3, radius):
-    dctf[${i}] /= ${i};
+% for j in range(numc):
+    dctf[${i}].s${j} /= select(${i}, 1, (${allc[n][i][0]}dctf[${i}].s${j}<+0.0 && dcmin.s${j}<0.1)); //${allc[n][i]}
+% endfor
 % endfor
 % if numc>1:
     result = clamp((${dtype+s})fstval(dctf), (${dtype+s})(${', '.join(['0.0']*numc)}), (${dtype+s})(${', '.join(['1.0']*numc)}));
@@ -150,8 +154,8 @@ for angle in range(0, 360, 5):
 
 datal = cv2.imread("../cvrecogn/cicada_molt_stereo_pair_by_markdow.jpg")/255
 
-datal *= 0.9
-datal += np.random.rand(datal.size).reshape(datal.shape)*0.1
+datal *= 0.8
+datal += np.random.rand(datal.size).reshape(datal.shape)*0.2
 
 datalcl = arr_from_np(queue, datal.astype(np.float32))
 
