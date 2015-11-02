@@ -24,21 +24,25 @@ tplsrc = """
 #define M_PI ${Decimal(pi)}
 #endif
 
+
 #define c0 ${Decimal(1. / sqrt(2.) * sqrt(2. / radius))}
+//Generated DCT coefficients
 % for i in range(1,radius+2):
 #define c${i} ${Decimal(cos(pi * i / (2*radius)) * sqrt(2. / radius))}
 % endfor
 
 
+//Return value of only n-element from rdct
 ${dtype+s} fstval(const ${dtype+s} x[${radius}]){
     return ${' '.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allc[n])])};
 }
 
-
+//Return value of only last from dct
 ${dtype+s} highfq(const ${dtype+s} x[${radius}]) {
     return ${' '.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[radius-1])])};
 }
 
+//Calculate full dct-${radius}
 void dct_ii_${radius}a(const ${dtype+s} x[${radius}], ${dtype+s} X[${radius}]) {
 % for i in range(0,radius):
     X[${i}] = ${' '.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[i])])};
@@ -54,12 +58,14 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
     ${dtype+s} data[${radius}];
     ${dtype+s} dctf[${radius}];
     ${dtype+s} result;
-    ${dtype} dcsmin = INFINITY;
-    ${dtype} dcsum;
+    ${dtype} dcsmin = INFINITY; //Minimal sum of last fqs.
+    ${dtype} dcsum;             //Sum of last fqs
     ${dtype+s} dccurrent;
-    ${dtype+s} dcmin = (${dtype+s})(${', '.join(numc*['INFINITY'])});
-    
-    const char allcrds[${len(crds)}][2] = {${','.join(['{'+str(a)+', '+str(b)+'}' for a, b in crds])}};
+    ${dtype+s} dcmin = (${dtype+s})(${', '.join(numc*['INFINITY'])}); //Last fqs corresponding dcsmin
+    const char allcrds[${len(crds)}][2] = {${','.join(['{'+str(a)+', '+str(b)+'}' for a, b in crds])}}; // Cache of round pixels
+    // Radiuses construct from allcrds pixels
+    const char rads[${len(rads)}][${len(rads[0])}] = {${(',\\\\\\n'+33*' ').join(['{'+', '.join([str(a) for a in coords])+'}' for coords in rads])}};
+
     for(uint i=0; i<${len(crds)}; i++){
         x = allcrds[i][0];
         y = allcrds[i][1];
@@ -71,7 +77,7 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
         alldata[i] = gdatain[idx + ${w}*y + x];
 % endif
     } 
-    const char rads[${len(rads)}][${len(rads[0])}] = {${(',\\\\\\n'+33*' ').join(['{'+', '.join([str(a) for a in coords])+'}' for coords in rads])}};
+    //Find best direction
     for(uint i=0; i<${rads_cnt}; i++){
         for(uint j=0; j<${radius}; j++){
             c = rads[i][j];
@@ -83,16 +89,20 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
 % else:
         dcsum = highfq(data);
 % endif
-        dcmin = select(dcmin, dccurrent, (uint${s})(dcsum<dcsmin));
+        dcmin = select(dcmin, dccurrent, (uint${s})(dcsum<dcsmin)); //??-1
         mini  = select(mini, i, (uint)(dcsum<dcsmin));
         dcsmin = select(dcsmin, dcsum, (int)(mini==i));
     }
+    //Get line of best direction found
     for(uint j=0; j<${radius}; j++){
         c = rads[mini][j];
         data[j] = (${dtype+s}) alldata[c];
     }
-    gminis[idx] = mini;
-    dct_ii_${radius}a(data, dctf);
+    gminis[idx] = mini; //Store minimal index for debug vis
+    dct_ii_${radius}a(data, dctf); //Compute 1-d dct-${radius} of best direction
+    //dcmin = dctf[${radius-1}]; //??-1
+    //Divide fq to 1 (no divide at all) when: sign*fq < 0 (always positive noise, may be here I'm wrong !!TODO: check it)
+    //and/or (??-2) max fq < 0.1 (not an noisy color)
 % for i in range(3, radius):
 % for j in range(numc):
     dctf[${i}].s${j} /= select(${i}, 1, (${allc[n][i][0]}dctf[${i}].s${j}<+0.0 && dcmin.s${j}<0.1)); //${allc[n][i]}
@@ -120,7 +130,9 @@ def arr_from_np(queue, nparr):
     buf = cl.Buffer(ctx, mf.READ_WRITE| mf.COPY_HOST_PTR, hostbuf=nparr)
     return clarray.Array(queue, nparr.shape, nparr.dtype, data=buf)
 
+# Collect pixel coordinates of the round 
 allcircle = []
+# Calculate x, y coordinates of radial lines.
 def get_radius(n, r, angle):
     res = []
     for i in range(-n, r-n):
@@ -128,9 +140,11 @@ def get_radius(n, r, angle):
         y = round( sin(2*pi*angle/360)*i )
         if not [x,y] in allcircle:
             allcircle.append([x,y])
-        res.append(allcircle.index([x,y]))
+        res.append(allcircle.index([x,y])) # Coordinates mapped to pixels collection
     return res
 
+
+# Calculate position of rdct coefficients (cx) with sign
 allc = []
 for n in range(rr):
   line = []
@@ -146,6 +160,7 @@ for n in range(rr):
     line.append((pre, num,))
   allc.append(line)
 import numpy as np
+# Transpose to get position of dct coefficients (cx) with sign
 allct = np.array(allc).transpose(1,0,2).tolist()
 
 rads = []
