@@ -9,7 +9,6 @@ ctx = cl.create_some_context()
 queue = cl.CommandQueue(ctx)
 mf = cl.mem_flags
 
-
 tplsrc = """
 <% from math import cos,sqrt %>
 <% from decimal import Decimal %>
@@ -24,6 +23,9 @@ tplsrc = """
 #define M_PI ${Decimal(pi)}
 #endif
 
+#define amp2(a) (max(a.s0, a.s1) - min(a.s0, a.s1))
+#define amp3(a) (max(max(a.s0, a.s1), a.s2) - min(min(a.s0, a.s1), a.s2))
+#define amp4(a) (max(max(a.s0, a.s1), max(a.s2, a.s3)) - min(min(a.s0, a.s1), min(a.s2, a.s3)))
 
 #define c0 ${Decimal(1. / sqrt(2.) * sqrt(2. / radius))}
 //Generated DCT coefficients
@@ -60,6 +62,7 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
     ${dtype+s} result;
     ${dtype} dcsmin = INFINITY; //Minimal sum of last fqs.
     ${dtype} dcsum;             //Sum of last fqs
+    ${dtype} amplh;             //Difference betw max and min of hfq of diff colors. If small - seems it not an noise.
     ${dtype+s} dccurrent;
     ${dtype+s} dcmin = (${dtype+s})(${', '.join(numc*['INFINITY'])}); //Last fqs corresponding dcsmin
     const char allcrds[${len(crds)}][2] = {${','.join(['{'+str(a)+', '+str(b)+'}' for a, b in crds])}}; // Cache of round pixels
@@ -86,10 +89,10 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
 % if numc>1:
         dccurrent = highfq(data);
         dcsum = ${'+'.join(['dccurrent.s'+str(i) for i in range(numc)])};
+        dcmin = select(dcmin, dccurrent, (uint${s})(dcsum<dcsmin)); //??-1
 % else:
         dcsum = highfq(data);
 % endif
-        dcmin = select(dcmin, dccurrent, (uint${s})(dcsum<dcsmin)); //??-1
         mini  = select(mini, i, (uint)(dcsum<dcsmin));
         dcsmin = select(dcsmin, dcsum, (int)(mini==i));
     }
@@ -101,12 +104,17 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
     gminis[idx] = mini; //Store minimal index for debug vis
     dct_ii_${radius}a(data, dctf); //Compute 1-d dct-${radius} of best direction
     //dcmin = dctf[${radius-1}]; //??-1
+    amplh = amp${numc}(dcmin);
     //Divide fq to 1 (no divide at all) when: sign*fq < 0 (always positive noise, may be here I'm wrong !!TODO: check it)
     //and/or (??-2) max fq < 0.1 (not an noisy color)
 % for i in range(3, radius):
+% if numc>1:
 % for j in range(numc):
-    dctf[${i}].s${j} /= select(${i}, 1, (${allc[n][i][0]}dctf[${i}].s${j}<+0.0 && dcmin.s${j}<0.1)); //${allc[n][i]}
+    dctf[${i}].s${j} /= select(${i}, 1, (${allc[n][i][0]}dctf[${i}].s${j}<+0.0 && dcmin.s${j}<0.1)||amplh<0.1); //${allc[n][i]}
 % endfor
+% else:
+    dctf[${i}].s${j} /= select(${i}, 1, (${allc[n][i][0]}dctf[${i}]<+0.0 && dcsmin<0.1)); //${allc[n][i]}
+% endif    
 % endfor
 % if numc>1:
     result = clamp((${dtype+s})fstval(dctf), (${dtype+s})(${', '.join(['0.0']*numc)}), (${dtype+s})(${', '.join(['1.0']*numc)}));
@@ -121,7 +129,7 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
 
 tpl = Template(tplsrc)
 rr = 8
-nn = 2
+nn = 1
 denom = 2*rr
 
 def arr_from_np(queue, nparr):
@@ -169,8 +177,8 @@ for angle in range(0, 360, 5):
 
 datal = cv2.imread("../cvrecogn/cicada_molt_stereo_pair_by_markdow.jpg")/255
 
-datal *= 0.8
-datal += np.random.rand(datal.size).reshape(datal.shape)*0.2
+datal *= 0.75
+datal += np.random.rand(datal.size).reshape(datal.shape)*0.25
 
 datalcl = arr_from_np(queue, datal.astype(np.float32))
 
