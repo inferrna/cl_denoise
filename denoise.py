@@ -41,7 +41,9 @@ ${dtype+s} fstval(const ${dtype+s} x[${radius}]){
 
 //Return value of only last from dct
 ${dtype+s} highfq(const ${dtype+s} x[${radius}]) {
-    return ${' '.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[radius-1])])};
+    //TODO: sum fqs with sign while each may differ from sign of last
+    return ${'\\n'.join([''.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[r])]) for r in range(radius-3, radius)])};
+    //return ${' '.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[radius-1])])};
 }
 
 //Calculate full dct-${radius}
@@ -87,7 +89,8 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
             data[j] = (${dtype+s}) alldata[c];
         }
 % if numc>1:
-        dccurrent = highfq(data);
+        //TODO: move signing to highfq function
+        dccurrent = ${allc[n][-1][0]}highfq(data);
         dcsum = ${'+'.join(['dccurrent.s'+str(i) for i in range(numc)])};
         dcmin = select(dcmin, dccurrent, (uint${s})(dcsum<dcsmin)); //??-1
 % else:
@@ -104,16 +107,17 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
     gminis[idx] = mini; //Store minimal index for debug vis
     dct_ii_${radius}a(data, dctf); //Compute 1-d dct-${radius} of best direction
     //dcmin = dctf[${radius-1}]; //??-1
-    amplh = amp${numc}(dcmin);
+    amplh = amp${numc}(dctf[${radius-1}]); //OR dcmin
+    //printf("Thread %u %u. amplh == %f\\n", gy, gx, amplh);
     //Divide fq to 1 (no divide at all) when: sign*fq < 0 (always positive noise, may be here I'm wrong !!TODO: check it)
     //and/or (??-2) max fq < 0.1 (not an noisy color)
-% for i in range(4, radius):
+% for i in range(radius//3+1, radius):
 % if numc>1:
 % for j in range(numc):
-    dctf[${i}].s${j} /= select(${i}, 1, (${allc[n][i][0]}dctf[${i}].s${j}<+0.0 && dcmin.s${j}<0.1)||amplh<0.1); //${allc[n][i]}
+    dctf[${i}].s${j} /= ${i};//select(${i}, 1, ((dcmin.s${j}<0.1)||(amplh<0.1)));
 % endfor
 % else:
-    dctf[${i}].s${j} /= select(${i}, 1, (${allc[n][i][0]}dctf[${i}]<+0.0 && dcsmin<0.1)); //${allc[n][i]}
+    dctf[${i}].s${j} /= select(${i}, 1, (dctf[${i}]<0.1); //
 % endif    
 % endfor
 % if numc>1:
@@ -132,6 +136,14 @@ rr = 8
 nn = 1
 denom = 2*rr
 
+def draw_rad(array, y, x, rads, gminis):
+    for i, (dx, dy) in enumerate([allcircle[c] for c in rads[gminiscl[y, x].get()]]):
+        array[y+dy, x+dx,:] = 1.0
+        if i==nn:
+            array[y+dy, x+dx,1] = 0.0
+    Image.fromarray(np.round(array[:,:,::-1]*255).astype(np.uint8)).show()
+
+
 def arr_from_np(queue, nparr):
     if nparr.dtype == np.object:
         nparr = np.concatenate(nparr)
@@ -146,9 +158,10 @@ def get_radius(n, r, angle):
     for i in range(-n, r-n):
         x = round( cos(2*pi*angle/360)*i )
         y = round( sin(2*pi*angle/360)*i )
-        if not [x,y] in allcircle:
-            allcircle.append([x,y])
-        res.append(allcircle.index([x,y])) # Coordinates mapped to pixels collection
+        pc = [y,x]  # Swapped. TODO: recheck it
+        if not pc in allcircle:
+            allcircle.append(pc)
+        res.append(allcircle.index(pc)) # Coordinates mapped to pixels collection
     return res
 
 
@@ -176,19 +189,25 @@ step = round(360/(2*pi*rr) + 0.5)
 for angle in range(0, 360+step, step):
     rads.append(get_radius(nn, rr, angle))
 
+#datal = cv2.resize(cv2.imread("../cvrecogn/cicada_molt_stereo_pair_by_markdow.jpg"), (128, 64), interpolation=cv2.INTER_LANCZOS4)/255
 datal = cv2.imread("../cvrecogn/cicada_molt_stereo_pair_by_markdow.jpg")/255
 
-datal *= 0.75
-datal += np.random.rand(datal.size).reshape(datal.shape)*0.25
+h, w = datal.shape[:2]
+
+idxdark = datal<0.5
+idxlight = np.min(datal, axis=2)>0.5
+rnd = np.random.rand(datal[idxlight].size//3)*0.25
+datal[idxlight] *= 0.75
+datal[idxlight] += np.array(3*[rnd]).T#.reshape(-1, datal.shape[-1])
+datal[idxdark] += np.random.rand(datal[idxdark].size)*0.25
 
 datalcl = arr_from_np(queue, datal.astype(np.float32))
 
 
 
 res = clarray.zeros_like(datalcl)
-gminiscl = clarray.zeros_like(datalcl).astype(np.uint32)
+gminiscl = clarray.zeros(dtype=np.uint32, shape=datalcl.shape[:2], queue=queue)
 
-h, w = datalcl.shape[:2]
 
 ksource = tpl.render(rads=rads, w=w, allc=allc, allct=allct, n=nn, dtype='float', crds=allcircle, numc=3)
 print(ksource)
@@ -201,3 +220,5 @@ resint = np.round(res.get()*255).astype(np.uint8)
 from PIL import Image
 Image.fromarray(np.round(datalcl.get()[:,:,::-1]*255).astype(np.uint8)).show()
 Image.fromarray(resint[:,:,::-1]).show()
+#draw_rad(datal.copy(), 120, 130, rads, gminiscl.get())
+
