@@ -107,7 +107,7 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
     amplh = amp${numc}(dcmin);
     //Divide fq to 1 (no divide at all) when: sign*fq < 0 (always positive noise, may be here I'm wrong !!TODO: check it)
     //and/or (??-2) max fq < 0.1 (not an noisy color)
-% for i in range(3, radius):
+% for i in range(4, radius):
 % if numc>1:
 % for j in range(numc):
     dctf[${i}].s${j} /= select(${i}, 1, (${allc[n][i][0]}dctf[${i}].s${j}<+0.0 && dcmin.s${j}<0.1)||amplh<0.1); //${allc[n][i]}
@@ -172,7 +172,8 @@ import numpy as np
 allct = np.array(allc).transpose(1,0,2).tolist()
 
 rads = []
-for angle in range(0, 360, 5):
+step = round(360/(2*pi*rr) + 0.5)
+for angle in range(0, 360+step, step):
     rads.append(get_radius(nn, rr, angle))
 
 datal = cv2.imread("../cvrecogn/cicada_molt_stereo_pair_by_markdow.jpg")/255
