@@ -43,7 +43,7 @@ ${dtype+s} fstval(const ${dtype+s} x[${radius}]){
 //Return value of only last from dct
 ${dtype+s} highfq(const ${dtype+s} x[${radius}]) {
     //allc[n][r][0]
-    return ${'\\n+'.join(['fabs('+''.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[r])])+')' for r in range(radius//2, radius)])};
+    return ${'\\n+'.join(['fabs('+''.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[r])])+')' for r in range(radius-3, radius)])};
     //return ${' '.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[radius-1])])};
 }
 
@@ -107,15 +107,20 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
     }
     gminis[idx] = mini; //Store minimal index for debug vis
     dct_ii_${radius}a(data, dctf); //Compute 1-d dct-${radius} of best direction
-    dcmin = fabs(dctf[${radius-1}]); //??-1
-    amplh = amp${numc}(dctf[${radius-1}]); //OR dcmin
+    //dcmin = fabs(dctf[${radius-1}]); //??-1
+    amplh = amp${numc}(dctf[${radius-1}]) + amp${numc}(dctf[${radius-2}]); //OR dcmin
     //printf("Thread %u %u. amplh == %f\\n", gy, gx, amplh);
     //Divide fq to 1 (no divide at all) when: sign*fq < 0 (always positive noise, may be here I'm wrong !!TODO: check it)
     //and/or (??-2) max fq < 0.1 (not an noisy color)
+    ${'int'+s} dvdr = (${'int'+s})(${', '.join(numc*['1'])});
+    dvdr = select(dvdr, (${'int'+s})(${', '.join(numc*['2'])}), (dcmin>(${dtype})0.1));
+    dvdr = select(dvdr, (${'int'+s})(${', '.join(numc*['3'])}), (dcmin>(${dtype})0.5));
+    dvdr = select(dvdr, (${'int'+s})(${', '.join(numc*['4'])}), (dcmin>(${dtype})1.0));
+    
 % for i in range(radius//2, radius):
 % if numc>1:
 % for j in range(numc):
-    dctf[${i}].s${j} /= select(${i}, 1, ((dcmin.s${j}<0.01)||(amplh<0.05)));
+    dctf[${i}].s${j} /= select(dvdr.s${j}*${i}, 1, (uint)(amplh<0.1));
 % endfor
 % else:
     dctf[${i}].s${j} /= select(${i}, 1, (dctf[${i}]<0.1); //
@@ -165,7 +170,7 @@ def get_radius(n, r, angle):
     for i in range(-n, r-n):
         x = round( cos(2*pi*angle/360)*i )
         y = round( sin(2*pi*angle/360)*i )
-        pc = [y,x]  # Swapped. TODO: recheck it
+        pc = [x,y]  # Swapped. TODO: recheck it
         if not pc in allcircle:
             allcircle.append(pc)
         res.append(allcircle.index(pc)) # Coordinates mapped to pixels collection
