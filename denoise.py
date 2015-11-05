@@ -3,6 +3,7 @@ import pyopencl as cl
 from pyopencl import array as clarray
 from math import sin, cos, pi
 from mako.template import Template
+from scipy import fftpack
 import cv2
 
 ctx = cl.create_some_context()
@@ -41,7 +42,8 @@ ${dtype+s} fstval(const ${dtype+s} x[${radius}]){
 
 //Return value of only last from dct
 ${dtype+s} highfq(const ${dtype+s} x[${radius}]) {
-    return ${'\\n'.join([allc[n][r][0]+'('+''.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[r])])+')' for r in range(radius-3, radius)])};
+    //allc[n][r][0]
+    return ${'\\n+'.join(['fabs('+''.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[r])])+')' for r in range(radius//2, radius)])};
     //return ${' '.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[radius-1])])};
 }
 
@@ -105,15 +107,15 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
     }
     gminis[idx] = mini; //Store minimal index for debug vis
     dct_ii_${radius}a(data, dctf); //Compute 1-d dct-${radius} of best direction
-    //dcmin = dctf[${radius-1}]; //??-1
+    dcmin = fabs(dctf[${radius-1}]); //??-1
     amplh = amp${numc}(dctf[${radius-1}]); //OR dcmin
     //printf("Thread %u %u. amplh == %f\\n", gy, gx, amplh);
     //Divide fq to 1 (no divide at all) when: sign*fq < 0 (always positive noise, may be here I'm wrong !!TODO: check it)
     //and/or (??-2) max fq < 0.1 (not an noisy color)
-% for i in range(radius//3+1, radius):
+% for i in range(radius//2, radius):
 % if numc>1:
 % for j in range(numc):
-    dctf[${i}].s${j} /= ${i};//select(${i}, 1, ((dcmin.s${j}<0.1)||(amplh<0.1)));
+    dctf[${i}].s${j} /= select(${i}, 1, ((dcmin.s${j}<0.01)||(amplh<0.05)));
 % endfor
 % else:
     dctf[${i}].s${j} /= select(${i}, 1, (dctf[${i}]<0.1); //
@@ -136,10 +138,16 @@ nn = 1
 denom = 2*rr
 
 def draw_rad(array, y, x, rads, gminis):
+    arr = []
     for i, (dx, dy) in enumerate([allcircle[c] for c in rads[gminiscl[y, x].get()]]):
+        arr.append(array[y+dy, x+dx,:].copy())
         array[y+dy, x+dx,:] = 1.0
         if i==nn:
             array[y+dy, x+dx,1] = 0.0
+    nparr = np.array(arr)
+    dctarr = fftpack.dct(arr, axis=0)
+    print(nparr)
+    print(dctarr)
     Image.fromarray(np.round(array[:,:,::-1]*255).astype(np.uint8)).show()
 
 
