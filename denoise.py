@@ -41,8 +41,7 @@ ${dtype+s} fstval(const ${dtype+s} x[${radius}]){
 
 //Return value of only last from dct
 ${dtype+s} highfq(const ${dtype+s} x[${radius}]) {
-    //TODO: sum fqs with sign while each may differ from sign of last
-    return ${'\\n'.join([''.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[r])]) for r in range(radius-3, radius)])};
+    return ${'\\n'.join([allc[n][r][0]+'('+''.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[r])])+')' for r in range(radius-3, radius)])};
     //return ${' '.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[radius-1])])};
 }
 
@@ -90,7 +89,7 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
         }
 % if numc>1:
         //TODO: move signing to highfq function
-        dccurrent = ${allc[n][-1][0]}highfq(data);
+        dccurrent = highfq(data);
         dcsum = ${'+'.join(['dccurrent.s'+str(i) for i in range(numc)])};
         dcmin = select(dcmin, dccurrent, (uint${s})(dcsum<dcsmin)); //??-1
 % else:
