@@ -194,12 +194,13 @@ datal = cv2.imread("../cvrecogn/cicada_molt_stereo_pair_by_markdow.jpg")/255
 
 h, w = datal.shape[:2]
 
-idxdark = datal<0.5
-idxlight = np.min(datal, axis=2)>0.5
-rnd = np.random.rand(datal[idxlight].size//3)*0.25
-datal[idxlight] *= 0.75
-datal[idxlight] += np.array(3*[rnd]).T#.reshape(-1, datal.shape[-1])
-datal[idxdark] += np.random.rand(datal[idxdark].size)*0.25
+datal += np.random.rand(datal.size).reshape(datal.shape)*(1.0-datal)*0.5
+#idxdark = datal<0.5
+#idxlight = np.min(datal, axis=2)>0.5
+#rnd = np.random.rand(datal[idxlight].size//3)*0.25
+#datal[idxlight] *= 0.75
+#datal[idxlight] += np.array(3*[rnd]).T#.reshape(-1, datal.shape[-1])
+#datal[idxdark] += np.random.rand(datal[idxdark].size)*0.25
 
 datalcl = arr_from_np(queue, datal.astype(np.float32))
 
