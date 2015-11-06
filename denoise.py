@@ -3,9 +3,13 @@ import pyopencl as cl
 from pyopencl import array as clarray
 from math import sin, cos, pi
 from mako.template import Template
+from mako import exceptions
 from scipy import fftpack
 import cv2
+import tkinter as tk
+from PIL import ImageDraw, Image, ImageTk
 import sys
+import os
 
 ctx = cl.create_some_context()
 queue = cl.CommandQueue(ctx)
@@ -29,29 +33,28 @@ tplsrc = """
 #define amp3(a) (max(max(a.s0, a.s1), a.s2) - min(min(a.s0, a.s1), a.s2))
 #define amp4(a) (max(max(a.s0, a.s1), max(a.s2, a.s3)) - min(min(a.s0, a.s1), min(a.s2, a.s3)))
 
-#define c0 ${Decimal(1. / sqrt(2.) * sqrt(2. / radius))}
-//Generated DCT coefficients
-% for i in range(1,radius+2):
-#define c${i} ${Decimal(cos(pi * i / (2*radius)) * sqrt(2. / radius))}
+#define cf0 ${Decimal(1. / sqrt(2.) * sqrt(2. / fr))}
+//Generated DCT coefficients for filtering radius
+% for i in range(1,fr+2):
+#define cf${i} ${Decimal(cos(pi * i / (2*fr)) * sqrt(2. / fr))}
 % endfor
 
 
 //Return value of only n-element from rdct
 ${dtype+s} fstval(const ${dtype+s} x[${radius}]){
-    return ${' '.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allc[n])])};
+    return ${' '.join(['{0}x[{2}]*({3})cf{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allcf[0])])};
 }
 
 //Return value of only last from dct
 ${dtype+s} highfq(const ${dtype+s} x[${radius}]) {
-    //allc[n][r][0]
-    return ${'\\n+'.join(['fabs('+''.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[r])])+')' for r in range(radius//3, radius-1)])};
-    //return ${' '.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[radius-1])])};
+    ${dtype+s} sum = ${' + '.join(['fabs(x[0] - x[{0}])/({2}){1}'.format(i, sqrt(i), dtype) for i in range(1,radius)])};
+    return sum;
 }
 
-//Calculate full dct-${radius}
-void dct_ii_${radius}a(const ${dtype+s} x[${radius}], ${dtype+s} X[${radius}]) {
-% for i in range(0,radius):
-    X[${i}] = ${' '.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[i])])};
+//Calculate full dct-${fr}
+void dct_ii_${fr}a(const ${dtype+s} x[${radius}], ${dtype+s} X[${radius}]) {
+% for i in range(0,fr):
+    X[${i}] = ${' '.join(['{0}x[{2}]*({3})cf{1}'.format(c[0], c[1], j+n, dtype) for j,c in enumerate(allctf[i])])};
 % endfor
 }
 
@@ -107,22 +110,22 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
         data[j] = (${dtype+s}) alldata[c];
     }
     gminis[idx] = mini; //Store minimal index for debug vis
-    dct_ii_${radius}a(data, dctf); //Compute 1-d dct-${radius} of best direction
+    dct_ii_${fr}a(data, dctf); //Compute 1-d dct-${radius} of best direction
     //dcmin = fabs(dctf[${radius-1}]); //??-1
-    amplh = fabs(amp${numc}(dctf[${radius-1}]) + amp${numc}(dctf[${radius-2}])); //OR dcmin
+    amplh = fabs(amp${numc}(dctf[${fr-1}]) + amp${numc}(dctf[${fr-2}])); //OR dcmin
     //if(gx==1000) printf("amplh == %f\\n", amplh);
     //printf("Thread %u %u. amplh == %f\\n", gy, gx, amplh);
     //Divide fq to 1 (no divide at all) when: sign*fq < 0 (always positive noise, may be here I'm wrong !!TODO: check it)
     //and/or (??-2) max fq < 0.1 (not an noisy color)
     ${'int'+s} dvdr = (${'int'+s})(${', '.join(numc*['1'])});
-    dvdr = select(dvdr, (${'int'+s})(${', '.join(numc*['2'])}), (dcmin>(${dtype})${radius/8}));
-    dvdr = select(dvdr, (${'int'+s})(${', '.join(numc*['3'])}), (dcmin>(${dtype})${radius/4}));
-    dvdr = select(dvdr, (${'int'+s})(${', '.join(numc*['4'])}), (dcmin>(${dtype})${radius/3}));
+    dvdr = select(dvdr, (${'int'+s})(${', '.join(numc*['2'])}), (dcmin>(${dtype})${fr/5}));
+    dvdr = select(dvdr, (${'int'+s})(${', '.join(numc*['3'])}), (dcmin>(${dtype})${fr/3}));
+    dvdr = select(dvdr, (${'int'+s})(${', '.join(numc*['4'])}), (dcmin>(${dtype})${fr/2}));
     
-% for i in range(radius//3, radius):
+% for i in range(fr//3, fr):
 % if numc>1:
 % for j in range(numc):
-    dctf[${i}].s${j} /= select(dvdr.s${j}*${i}, 1, (uint)(amplh<.015));
+    dctf[${i}].s${j} /= dvdr.s${j}*${i};//select(dvdr.s${j}*${i}, 1, (uint)(amplh<.01));
 % endfor
 % else:
     dctf[${i}].s${j} /= select(${i}, 1, (dctf[${i}]<0.1); //
@@ -140,9 +143,9 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
 """
 
 tpl = Template(tplsrc)
-rr = 8
-nn = 1
-denom = 2*rr
+fr = 16
+rr = 16
+nn = 0
 
 def draw_rad(array, y, x, rads, gminis):
     arr = []
@@ -180,23 +183,29 @@ def get_radius(n, r, angle):
 
 
 # Calculate position of rdct coefficients (cx) with sign
-allc = []
-for n in range(rr):
-  line = []
-  for k in range(rr):
-    num = k * (2*n + 1)
-    while num > denom * 2: num -= denom * 2
-    if num > denom: num = 2 * denom - num
-    if num > denom / 2:
-      pre = "-"
-      num = denom - num
-    else:
-        pre = '+'
-    line.append((pre, num,))
-  allc.append(line)
-import numpy as np
+def genc(rad):
+    denom = 2*rad
+    ac = []
+    for n in range(rad):
+      line = []
+      for k in range(rad):
+        num = k * (2*n + 1)
+        while num > denom * 2: num -= denom * 2
+        if num > denom: num = 2 * denom - num
+        if num > denom / 2:
+          pre = "-"
+          num = denom - num
+        else:
+            pre = '+'
+        line.append((pre, num,))
+      ac.append(line)
 # Transpose to get position of dct coefficients (cx) with sign
-allct = np.array(allc).transpose(1,0,2).tolist()
+    act = np.array(ac).transpose(1,0,2).tolist()
+    return ac, act
+
+allc, allct = genc(rr)
+allcs, allcts = genc(rr-1)
+allcf, allctf = genc(fr)
 
 rads = []
 step = round(360/(2*pi*rr) + 0.5)
@@ -224,8 +233,16 @@ datalcl = arr_from_np(queue, datal.astype(np.float32))
 res = clarray.zeros_like(datalcl)
 gminiscl = clarray.zeros(dtype=np.uint32, shape=datalcl.shape[:2], queue=queue)
 
-
-ksource = tpl.render(rads=rads, w=w, allc=allc, allct=allct, n=nn, dtype='float', crds=allcircle, numc=3)
+try:
+    ksource = tpl.render(rads=rads, w=w, allc=allc, allct=allct,\
+                         allcf=allcf, allctf=allctf, allcts=allcts, fr=fr,\
+                         n=nn, dtype='float', crds=allcircle, numc=3)
+except:
+    f = open('/tmp/makoerror.html', 'w')
+    f.write(exceptions.html_error_template().render().decode())
+    f.close()
+    os.system('firefox '+f.name)
+    exit()
 print(ksource)
 #exit()
 
@@ -233,10 +250,6 @@ program = cl.Program(ctx, ksource).build()
 program.filter(queue, (h-2*rr, w-2*rr,), None, datalcl.ravel().data, res.data, gminiscl.data)
 
 resint = np.round(res.get()*255).astype(np.uint8)
-
-import tkinter as tk
-from PIL import ImageDraw, Image, ImageTk
-import sys
 
 window = tk.Tk(className="bla")
 original = Image.fromarray(np.round(datal[:,:,::-1]*255).astype(np.uint8))
