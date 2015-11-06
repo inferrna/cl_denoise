@@ -5,6 +5,7 @@ from math import sin, cos, pi
 from mako.template import Template
 from scipy import fftpack
 import cv2
+import sys
 
 ctx = cl.create_some_context()
 queue = cl.CommandQueue(ctx)
@@ -43,7 +44,7 @@ ${dtype+s} fstval(const ${dtype+s} x[${radius}]){
 //Return value of only last from dct
 ${dtype+s} highfq(const ${dtype+s} x[${radius}]) {
     //allc[n][r][0]
-    return ${'\\n+'.join(['fabs('+''.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[r])])+')' for r in range(radius-3, radius)])};
+    return ${'\\n+'.join(['fabs('+''.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[r])])+')' for r in range(radius//3, radius-1)])};
     //return ${' '.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[radius-1])])};
 }
 
@@ -108,19 +109,20 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
     gminis[idx] = mini; //Store minimal index for debug vis
     dct_ii_${radius}a(data, dctf); //Compute 1-d dct-${radius} of best direction
     //dcmin = fabs(dctf[${radius-1}]); //??-1
-    amplh = amp${numc}(dctf[${radius-1}]) + amp${numc}(dctf[${radius-2}]); //OR dcmin
+    amplh = fabs(amp${numc}(dctf[${radius-1}]) + amp${numc}(dctf[${radius-2}])); //OR dcmin
+    //if(gx==1000) printf("amplh == %f\\n", amplh);
     //printf("Thread %u %u. amplh == %f\\n", gy, gx, amplh);
     //Divide fq to 1 (no divide at all) when: sign*fq < 0 (always positive noise, may be here I'm wrong !!TODO: check it)
     //and/or (??-2) max fq < 0.1 (not an noisy color)
     ${'int'+s} dvdr = (${'int'+s})(${', '.join(numc*['1'])});
-    dvdr = select(dvdr, (${'int'+s})(${', '.join(numc*['2'])}), (dcmin>(${dtype})0.1));
-    dvdr = select(dvdr, (${'int'+s})(${', '.join(numc*['3'])}), (dcmin>(${dtype})0.5));
-    dvdr = select(dvdr, (${'int'+s})(${', '.join(numc*['4'])}), (dcmin>(${dtype})1.0));
+    dvdr = select(dvdr, (${'int'+s})(${', '.join(numc*['2'])}), (dcmin>(${dtype})${radius/8}));
+    dvdr = select(dvdr, (${'int'+s})(${', '.join(numc*['3'])}), (dcmin>(${dtype})${radius/4}));
+    dvdr = select(dvdr, (${'int'+s})(${', '.join(numc*['4'])}), (dcmin>(${dtype})${radius/3}));
     
-% for i in range(radius//2, radius):
+% for i in range(radius//3, radius):
 % if numc>1:
 % for j in range(numc):
-    dctf[${i}].s${j} /= select(dvdr.s${j}*${i}, 1, (uint)(amplh<0.1));
+    dctf[${i}].s${j} /= select(dvdr.s${j}*${i}, 1, (uint)(amplh<.015));
 % endfor
 % else:
     dctf[${i}].s${j} /= select(${i}, 1, (dctf[${i}]<0.1); //
@@ -153,7 +155,7 @@ def draw_rad(array, y, x, rads, gminis):
     dctarr = fftpack.dct(arr, axis=0)
     print(nparr)
     print(dctarr)
-    Image.fromarray(np.round(array[:,:,::-1]*255).astype(np.uint8)).show()
+#    Image.fromarray(np.round(array[:,:,::-1]*255).astype(np.uint8)).show()
 
 
 def arr_from_np(queue, nparr):
@@ -202,11 +204,12 @@ for angle in range(0, 360+step, step):
     rads.append(get_radius(nn, rr, angle))
 
 #datal = cv2.resize(cv2.imread("../cvrecogn/cicada_molt_stereo_pair_by_markdow.jpg"), (128, 64), interpolation=cv2.INTER_LANCZOS4)/255
-datal = cv2.imread("../cvrecogn/cicada_molt_stereo_pair_by_markdow.jpg")/255
-
+#datal = cv2.imread("../cvrecogn/cicada_molt_stereo_pair_by_markdow.jpg")/255
+datal = cv2.imread(sys.argv[1] if len(sys.argv) >=2 else "DSC07693.png")/255
 h, w = datal.shape[:2]
 
-datal += np.random.rand(datal.size).reshape(datal.shape)*(1.0-datal)*0.5
+#datal += np.random.rand(datal.size).reshape(datal.shape)*(1.0-datal)*0.5
+
 #idxdark = datal<0.5
 #idxlight = np.min(datal, axis=2)>0.5
 #rnd = np.random.rand(datal[idxlight].size//3)*0.25
@@ -230,8 +233,27 @@ program = cl.Program(ctx, ksource).build()
 program.filter(queue, (h-2*rr, w-2*rr,), None, datalcl.ravel().data, res.data, gminiscl.data)
 
 resint = np.round(res.get()*255).astype(np.uint8)
-from PIL import Image
-Image.fromarray(np.round(datalcl.get()[:,:,::-1]*255).astype(np.uint8)).show()
-Image.fromarray(resint[:,:,::-1]).show()
-#draw_rad(datal.copy(), 120, 130, rads, gminiscl.get())
 
+import tkinter as tk
+from PIL import ImageDraw, Image, ImageTk
+import sys
+
+window = tk.Tk(className="bla")
+original = Image.fromarray(np.round(datal[:,:,::-1]*255).astype(np.uint8))
+
+canvas = tk.Canvas(window, width=original.size[0], height=original.size[1])
+canvas.pack()
+image_tk = ImageTk.PhotoImage(original)
+
+canvas.create_image(original.size[0]//2, original.size[1]//2, image=image_tk)
+filtered = Image.fromarray(resint[:,:,::-1])
+filtered.show()
+
+def callback(event):
+    datalcp = datal.copy()
+    draw_rad(datalcp, event.y, event.x, rads, gminiscl.get())
+    Image.fromarray(np.round(datalcp[:,:,::-1]*255).astype(np.uint8)).show()
+    print("clicked at: ", event.x, event.y)
+
+canvas.bind("<Button-1>", callback)
+tk.mainloop()
