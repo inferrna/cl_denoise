@@ -44,7 +44,7 @@ ${dtype+s} fstval(const ${dtype+s} x[${radius}]){
 //Return value of only last from dct
 ${dtype+s} highfq(const ${dtype+s} x[${radius}]) {
     //allc[n][r][0]
-    return ${'\\n+'.join(['fabs('+''.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[r])])+')' for r in range(radius//3, radius-1)])};
+    return ${'\\n+'.join(['fabs('+''.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[r])])+')' for r in range(1, radius)])};
     //return ${' '.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[radius-1])])};
 }
 
@@ -108,17 +108,19 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
     }
     gminis[idx] = mini; //Store minimal index for debug vis
     dct_ii_${radius}a(data, dctf); //Compute 1-d dct-${radius} of best direction
-    //dcmin = fabs(dctf[${radius-1}]); //??-1
+    dcmin = fabs(dctf[${radius-1}]); //??-1
     amplh = fabs(amp${numc}(dctf[${radius-1}]) + amp${numc}(dctf[${radius-2}])); //OR dcmin
     //if(gx==1000) printf("amplh == %f\\n", amplh);
     //printf("Thread %u %u. amplh == %f\\n", gy, gx, amplh);
     //Divide fq to 1 (no divide at all) when: sign*fq < 0 (always positive noise, may be here I'm wrong !!TODO: check it)
     //and/or (??-2) max fq < 0.1 (not an noisy color)
     ${'int'+s} dvdr = (${'int'+s})(${', '.join(numc*['1'])});
-    dvdr = select(dvdr, (${'int'+s})(${', '.join(numc*['2'])}), (dcmin>(${dtype})${radius/8}));
-    dvdr = select(dvdr, (${'int'+s})(${', '.join(numc*['3'])}), (dcmin>(${dtype})${radius/4}));
-    dvdr = select(dvdr, (${'int'+s})(${', '.join(numc*['4'])}), (dcmin>(${dtype})${radius/3}));
-    
+    dvdr = select(dvdr, (${'int'+s})(${', '.join(numc*['2'])}), (dcmin>(${dtype})${radius/128}));
+    dvdr = select(dvdr, (${'int'+s})(${', '.join(numc*['3'])}), (dcmin>(${dtype})${radius/96}));
+    dvdr = select(dvdr, (${'int'+s})(${', '.join(numc*['4'])}), (dcmin>(${dtype})${radius/64}));
+    //if(gx==${radius}) printf("dvdr == %d, %d, %d\\n", dvdr.s0, dvdr.s1, dvdr.s2);    
+    //if(gx==${radius}) printf("dcmin == %f, %f, %f\\n", dcmin.s0, dcmin.s1, dcmin.s2);    
+    //if(gx==${radius}) printf("amplh == %f\\n", amplh);    
 % for i in range(radius//3, radius):
 % if numc>1:
 % for j in range(numc):
@@ -140,7 +142,7 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
 """
 
 tpl = Template(tplsrc)
-rr = 8
+rr = 4
 nn = 1
 denom = 2*rr
 
@@ -247,6 +249,7 @@ image_tk = ImageTk.PhotoImage(original)
 
 canvas.create_image(original.size[0]//2, original.size[1]//2, image=image_tk)
 filtered = Image.fromarray(resint[:,:,::-1])
+filtered.save("out.png")
 filtered.show()
 
 def callback(event):
