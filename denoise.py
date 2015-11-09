@@ -142,7 +142,7 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
 """
 
 tpl = Template(tplsrc)
-rr = 4
+rr = 16
 nn = 1
 denom = 2*rr
 
