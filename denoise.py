@@ -43,8 +43,10 @@ ${dtype+s} fstval(const ${dtype+s} x[${radius}]){
 
 //Return value of only last from dct
 ${dtype+s} highfq(const ${dtype+s} x[${radius}]) {
+<% tstfqs = [1] + list(range(radius//2, radius)) %>
+<% _tstfqs = [1,2] %>
     //allc[n][r][0]
-    return ${'\\n+'.join(['fabs('+''.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[r])])+')' for r in range(1, radius)])};
+    return ${'\\n+'.join(['fabs('+''.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[r])])+')' for r in tstfqs])};
     //return ${' '.join(['{0}x[{2}]*({3})c{1}'.format(c[0], c[1], j, dtype) for j,c in enumerate(allct[radius-1])])};
 }
 
@@ -121,7 +123,7 @@ __kernel void filter(__global ${dtype} *gdatain, __global ${dtype} *gdataout, __
     //if(gx==${radius}) printf("dvdr == %d, %d, %d\\n", dvdr.s0, dvdr.s1, dvdr.s2);    
     //if(gx==${radius}) printf("dcmin == %f, %f, %f\\n", dcmin.s0, dcmin.s1, dcmin.s2);    
     //if(gx==${radius}) printf("amplh == %f\\n", amplh);    
-% for i in range(radius//3, radius):
+% for i in range(3, radius):
 % if numc>1:
 % for j in range(numc):
     dctf[${i}].s${j} /= select(dvdr.s${j}*${i}, 1, (uint)(amplh<.015));
